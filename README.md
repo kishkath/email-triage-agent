@@ -4,7 +4,67 @@ A Python background service that monitors a Gmail inbox, classifies emails as
 HIGH or LOW priority via an LLM Router Gateway (Gemini ↔ OpenAI), pushes
 HIGH alerts to Telegram instantly, and batches LOW emails into a daily digest.
 
-## Architecture
+> Click any section below to expand.
+
+---
+
+<details>
+<summary><strong>📝 Prompt Evaluation</strong></summary>
+
+The system prompt has been assessed against a structured prompt-quality
+rubric (explicit reasoning, structured output, self-checks, fallbacks, etc.).
+The full criteria breakdown and verbatim prompt live in
+[`prompt_evaluator.md`](prompt_evaluator.md) — it scores **6/8 ("Excellent")**,
+with the two gaps (multi-turn loop, reasoning-type tagging) being out of scope
+by design.
+
+### Evaluation result
+
+```json
+{
+  "explicit_reasoning": true,
+  "structured_output": true,
+  "tool_separation": true,
+  "conversation_loop": false,
+  "instructional_framing": true,
+  "internal_self_checks": true,
+  "reasoning_type_awareness": false,
+  "fallbacks": true,
+  "overall_clarity": "Excellent prompt with strong step-by-step reasoning, self-checks, and error fallbacks. Minor gaps in multi-turn support and reasoning-type tagging."
+}
+```
+
+### Criteria breakdown
+
+| Criterion | Result | Where it shows in the prompt |
+|-----------|--------|------------------------------|
+| `explicit_reasoning` | ✅ true | STEP 1–5 force an ordered, visible reasoning chain |
+| `structured_output` | ✅ true | Strict JSON schema under "Output Format" |
+| `tool_separation` | ✅ true | Prompt only classifies; routing/notification is left to the app |
+| `conversation_loop` | ❌ false | Single-shot classification — no multi-turn dialogue |
+| `instructional_framing` | ✅ true | "You MUST follow these steps in order." |
+| `internal_self_checks` | ✅ true | STEP 4 — over/under-triage review + confidence |
+| `reasoning_type_awareness` | ❌ false | Steps are not tagged by reasoning type |
+| `fallbacks` | ✅ true | BODY_MISSING, AMBIGUOUS, SECURITY_ALERT branches |
+
+### The classification prompt
+
+The full prompt lives in [`prompts/triage_prompt.py`](prompts/triage_prompt.py).
+It is a 5-step reasoning chain:
+
+1. **Identify category** (JOB, FINANCIAL, DEADLINE, OTP_SECURITY, NEWSLETTER,
+   SOCIAL, PERSONAL, UNKNOWN)
+2. **Assess urgency** — three YES/NO checks (24h action, risk, harm if ignored)
+3. **Classify priority** — HIGH or LOW
+4. **Self-check** — guard against over/under-triage, declare confidence
+5. **Compose message** — 3-line Telegram alert or 15-word digest line
+
+</details>
+
+---
+
+<details>
+<summary><strong>🏗️ Architecture</strong></summary>
 
 ```
    ┌──────────────┐    poll       ┌──────────────────┐
@@ -32,7 +92,12 @@ HIGH alerts to Telegram instantly, and batches LOW emails into a daily digest.
                                        notifier.telegram digest
 ```
 
-## Project layout
+</details>
+
+---
+
+<details>
+<summary><strong>📁 Project Layout</strong></summary>
 
 ```
 triage-system/
@@ -79,7 +144,12 @@ triage-system/
 2. Register it in `_PROVIDER_REGISTRY` inside `llm/router.py`.
 3. Add the provider key to `VALID_PROVIDERS` in `core/config.py`.
 
-## Setup
+</details>
+
+---
+
+<details>
+<summary><strong>⚙️ Setup</strong></summary>
 
 ### 1. Install dependencies
 
@@ -134,7 +204,14 @@ python main.py
 
 First run will open a browser for Gmail OAuth and cache `token.json`.
 
-### Smoke tests (one-off, no scheduler)
+</details>
+
+---
+
+<details>
+<summary><strong>🧪 Smoke Tests</strong></summary>
+
+One-off, no scheduler:
 
 ```powershell
 # Telegram round-trip
@@ -150,7 +227,12 @@ python -c "from gmail_service import fetch_unread_emails; [print(e['sender'], '|
 python -c "from classifier import classify_email; import json; print(json.dumps(classify_email({'id':'t1','sender':'hr@acme.com','subject':'Interview invite Friday','body':'We would like to invite you for an interview.','timestamp':''}), indent=2))"
 ```
 
-## LLM Router behavior
+</details>
+
+---
+
+<details>
+<summary><strong>🔀 LLM Router Behavior</strong></summary>
 
 - `complete()` tries `primary` then `fallback`.
 - Each provider call is independently logged.
@@ -161,23 +243,11 @@ python -c "from classifier import classify_email; import json; print(json.dumps(
 - `complete()` accepts an optional `response_schema` (a Pydantic model) and
   forwards it to the provider for native structured output.
 
-## Classification prompt
-
-The full system prompt lives in [`prompts/triage_prompt.py`](prompts/triage_prompt.py).
-It is a 5-step reasoning chain:
-
-1. **Identify category** (JOB, FINANCIAL, DEADLINE, OTP_SECURITY, NEWSLETTER,
-   SOCIAL, PERSONAL, UNKNOWN)
-2. **Assess urgency** — three YES/NO checks (24h action, risk, harm if ignored)
-3. **Classify priority** — HIGH or LOW
-4. **Self-check** — guard against over/under-triage, declare confidence
-5. **Compose message** — 3-line Telegram alert or 15-word digest line
-
 ### Structured output
 
 The output contract is the Pydantic model `TriageResult` in
-[`core/schema.py`](core/schema.py). It is enforced at generation time, not just parsed
-afterwards:
+[`core/schema.py`](core/schema.py). It is enforced at generation time, not just
+parsed afterwards:
 
 - **Gemini** — the model is passed as `response_schema` (with
   `response_mime_type=application/json`).
@@ -185,17 +255,16 @@ afterwards:
   `response_format` (strict structured outputs).
 
 The raw response is then validated with `TriageResult.model_validate_json()`.
-A trailing-comma strip in `classifier._parse_result()` is kept as a
-last-resort fallback. Any validation failure falls through to the safe-HIGH
-default, so a malformed response can never drop an email.
+A trailing-comma strip in `classifier._parse_result()` is kept as a last-resort
+fallback. Any validation failure falls through to the safe-HIGH default, so a
+malformed response can never drop an email.
 
-### Prompt evaluation
+</details>
 
-The system prompt has been assessed against a structured prompt-quality
-rubric (explicit reasoning, structured output, self-checks, fallbacks, etc.).
-See [`prompt_evaluator.md`](prompt_evaluator.md) for the full criteria
-breakdown and result — it scores 6/8, with the two gaps (multi-turn loop,
-reasoning-type tagging) being out of scope by design.
+---
+
+<details>
+<summary><strong>📤 Example Outputs</strong></summary>
 
 ### Example output (LOW)
 
@@ -226,20 +295,32 @@ Reply by tomorrow to confirm slot
 🤖 Classified by: GEMINI
 ```
 
-## Scheduling
+</details>
+
+---
+
+<details>
+<summary><strong>⏰ Scheduling &amp; Safety</strong></summary>
+
+### Scheduling
 
 - Inbox poll: every `POLL_INTERVAL_SECONDS` (default 300)
 - Daily digest: cron at `DIGEST_HOUR:00` local time (default 20:00)
 - A poll runs once on startup so you don't have to wait.
 
-## Safety / idempotency
+### Safety / idempotency
 
 - `processed_emails` (SQLite PK on `email_id`) prevents double-classification.
 - Digest entries persist until the daily flush succeeds; on Telegram failure
   they remain `sent=0` and are retried at the next digest fire.
 - Gmail scope is `gmail.readonly` — the agent never modifies your inbox.
 
-## GitHub Actions Deployment
+</details>
+
+---
+
+<details>
+<summary><strong>☁️ GitHub Actions Deployment</strong></summary>
 
 Run the agent in the cloud — no local machine required. A workflow polls every
 4 hours and commits triage state (`triage.db`, `.digest_marker`) back to the
@@ -310,7 +391,7 @@ runs. You can also trigger a run on demand from the Actions tab.
 - The committed `triage.db` contains Gmail message IDs but no message
   content. Still, prefer a private repo.
 
-## Smoke Tests (cloud pipeline)
+### Cloud-pipeline smoke output
 
 A successful manual run looks roughly like this in the Actions log:
 
@@ -362,10 +443,17 @@ And the daily digest (delivered once per UTC day at `DIGEST_HOUR`):
 | Two digests on the same day | Confirm `.digest_marker` was committed back by the previous run — check the run's commit |
 | 403 on `git push` | Repo Actions setting → "Workflow permissions" → enable "Read and write permissions" |
 
-## Operational notes
+</details>
+
+---
+
+<details>
+<summary><strong>🛠️ Operational Notes</strong></summary>
 
 - `token.json` is generated on first auth and refreshes itself. Delete it to
   re-auth.
 - `triage.db` accumulates processed IDs; safe to delete to re-process unread
   mail (but you may get duplicate alerts).
 - Logs go to stdout. Pipe to a file or `journalctl` in production.
+
+</details>
